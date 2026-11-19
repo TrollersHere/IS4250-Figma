@@ -94,8 +94,10 @@
 .ai-launcher > span:last-child { display: grid; text-align: left; }
 .ai-launcher strong { font-size: 12px; }
 .ai-launcher small { color: #bbe1d6; font-size: 9px; }
-.cookie { position: fixed; bottom: 0; left: 0; z-index: 4; display: flex; width: calc(100% - max(50%, 600px)); min-height: 52px; align-items: center; gap: 20px; background: #07583f; color: #e5f2ee; padding: 9px 5.2vw; font-size: 10px; }
-.cookie button { border: 1px solid #bad5cd; background: transparent; color: #fff; padding: 5px 12px; font-size: 9px; }
+.cookie { position: fixed; bottom: 0; left: 0; z-index: 4; display: flex; width: 100%; min-height: 58px; align-items: center; justify-content: space-between; gap: 24px; background: #07583f; color: #e5f2ee; padding: 12px clamp(18px, 5.2vw, 72px); font-size: 11px; line-height: 1.45; }
+.cookie-copy { max-width: 760px; }
+.cookie button { flex: 0 0 auto; border: 1px solid #bad5cd; border-radius: 3px; background: #fff; color: #07583f; cursor: pointer; padding: 7px 18px; font-size: 10px; font-weight: 700; }
+.cookie button:hover { background: #e5f2ee; }
 .page-dim { position: fixed; inset: 0; z-index: 40; background: rgb(11 26 24 / 54%); animation: fade-in .2s ease-out; }
 
 .ai-panel { position: fixed; top: 0; right: 0; z-index: 50; display: grid; width: min(50vw, 700px); min-width: 600px; height: 100dvh; grid-template-rows: auto minmax(0, 1fr) auto; overflow: hidden; background: #fff; box-shadow: -12px 0 45px rgb(12 44 38 / 18%); transform: translateX(105%); transition: transform .3s ease; }
@@ -216,7 +218,7 @@
 .message-label { margin: 0 5px 5px; color: #758682; font-size: 8px; font-weight: 700; letter-spacing: .03em; }
 .message-label.warning { color: var(--red); }
 .message-label.success { color: var(--green); }
-.bubble { border: 1px solid #dce5e3; border-radius: 4px 13px 13px 13px; background: #fff; color: #344f4b; padding: 11px 13px; font-size: 10px; line-height: 1.55; box-shadow: 0 2px 7px rgb(23 63 54 / 4%); }
+.bubble { max-width: 100%; border: 1px solid #dce5e3; border-radius: 4px 13px 13px 13px; background: #fff; color: #344f4b; padding: 11px 13px; font-size: 10px; line-height: 1.55; overflow-wrap: anywhere; white-space: pre-wrap; box-shadow: 0 2px 7px rgb(23 63 54 / 4%); }
 .message-row.user .bubble { border: 0; border-radius: 13px 4px 13px 13px; background: var(--green); color: #fff; }
 .bubble strong { display: block; margin-bottom: 4px; color: #153f38; font-size: 11px; }
 .message-row.user .bubble strong { color: #fff; }
@@ -377,6 +379,8 @@
   .quick-grid, .article-grid { grid-template-columns: 1fr; }
   .quick-item { border-right: 0; border-bottom: 1px solid #e6ecea; }
   .article-grid article:nth-child(n+3) { display: none; }
+  .cookie { align-items: flex-start; gap: 12px; padding: 12px 18px; font-size: 10px; }
+  .cookie button { padding: 6px 12px; }
   .landing { width: calc(100% - 32px); padding-top: 30px; }
   .message-list { width: calc(100% - 22px); }
   .message-column { max-width: 88%; }

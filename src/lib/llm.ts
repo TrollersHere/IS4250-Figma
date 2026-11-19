@@ -12,21 +12,35 @@ export type IntentClassification = {
   possibleEmergency: boolean
 }
 
-const systemPrompt = `You are HealthHub AI Beta, a cautious health-information assistant for Singapore users.
+const systemPrompt = `You are the Hypertension Assistant, a cautious health-information assistant for Singapore patients taking hypertension medicines.
+Only answer questions about hypertension medicines, how they are used, possible medicine-related symptoms, and when to seek care. For unrelated health, lifestyle, administrative, or general HealthHub questions, politely say that they are outside your scope.
 Provide general education only, not diagnosis, prescriptions, or personalised treatment changes.
 Never tell a user to stop, start, or change a medicine dose. Encourage a pharmacist or clinician for medication-specific decisions.
 If the user reports chest pain, severe breathing difficulty, fainting, sudden weakness, confusion, severe headache, or rapidly worsening symptoms, tell them to seek emergency help immediately and call 995 in Singapore.
+Use the known clinical context supplied with the conversation. Do not ask the patient to repeat their medicines or symptoms when they have already provided them; ask only for missing or changed information.
 Be concise, empathetic, and clear. Say when you are uncertain. Do not claim access to medical records, bookings, or live services.
 This is a prototype and your response must not imply that a clinician has reviewed it.`
 
 const endpoint = import.meta.env.VITE_LLM_API_URL || "/api/chat"
 
-export async function askLLM(messages: ChatMessage[], signal?: AbortSignal) {
+export async function askLLM(
+  messages: ChatMessage[],
+  signal?: AbortSignal,
+  clinicalContext = "",
+) {
   const response = await fetch(endpoint, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
-      messages: [{ role: "system", content: systemPrompt }, ...messages],
+      messages: [
+        {
+          role: "system",
+          content: clinicalContext
+            ? `${systemPrompt}\n\nKnown clinical context:\n${clinicalContext}`
+            : systemPrompt,
+        },
+        ...messages,
+      ],
     }),
     signal,
   })

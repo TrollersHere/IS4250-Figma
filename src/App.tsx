@@ -424,12 +424,12 @@ function Homepage({ onOpen }: { onOpen: () => void }) {
           <small>Beta</small>
         </span>
       </button>
-      <div className="cookie">
-        <span>
+      <div className="cookie" role="status">
+        <span className="cookie-copy">
           By continuing to use and navigate the HealthHub website, you consent
           to the use of cookies.
         </span>
-        <button>Accept</button>
+        <button type="button">Accept</button>
       </div>
     </div>
   )
@@ -463,6 +463,7 @@ function App() {
   const [history, setHistory] = useState<HistoryItem[]>(initialHistory)
   const [unresolved, setUnresolved] = useState(true)
   const [llmConversation, setLlmConversation] = useState<ChatMessage[]>([])
+  const [clinicalContext, setClinicalContext] = useState("")
   const endRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -544,6 +545,15 @@ function App() {
   }
 
   const chooseAssistant = (next: "healthhub" | "hypertension") => {
+    setAssistant(next)
+    setLanding(true)
+    setMessages([])
+    setClinicalContext("")
+    setFlow("idle")
+    setSelectedSigns([])
+    setDrawerOpen(false)
+    setHistoryOpen(false)
+    if (next === "healthhub") return
     if (next === "hypertension" && !singpassSignedIn) {
       setDrawerOpen(false)
       setHistoryOpen(false)
@@ -551,14 +561,7 @@ function App() {
       setSingpassRequiredOpen(true)
       return
     }
-    setAssistant(next)
-    setDrawerOpen(false)
-    setHistoryOpen(false)
-    setLanding(true)
-    setMessages([])
     setLlmConversation([])
-    setFlow("idle")
-    setSelectedSigns([])
   }
 
   const askAssistant = async (question: string) => {
@@ -569,9 +572,11 @@ function App() {
     setLlmConversation(nextConversation)
     setLoading(true)
     try {
-      const reply = await askLLM(nextConversation)
+      const reply = await askLLM(nextConversation, undefined, clinicalContext)
       setLlmConversation([...nextConversation, { role: "assistant", content: reply }])
-      addMessages(assistantMessage(reply, undefined, "normal", "HealthHub AI Beta"))
+      addMessages(
+        assistantMessage(reply, undefined, "normal", "Hypertension Assistant"),
+      )
     } catch {
       addMessages(
         assistantMessage(
@@ -587,6 +592,7 @@ function App() {
   }
 
   const startQuestion = async (question: string) => {
+    if (assistant !== "hypertension") return
     setLanding(false)
     addMessages(userMessage(question))
     const lower = question.toLowerCase()
@@ -654,11 +660,14 @@ function App() {
           assistantMessage(
             <>
               <span className="source-line">
-                <Icon name="shield" size={15} /> Simulated NEHR medication
-                record
+                <Icon name="shield" size={15} /> Retrieved from your NEHR medical records
               </span>
               <strong>Amlodipine 5 mg tablet</strong>
               <p>Recorded instruction: Take 1 tablet once daily.</p>
+              <p>
+                Is this medication and dosage accurate for you? Please confirm
+                before we continue.
+              </p>
               <small className="mock-note">
                 Illustrative record only — no live system is connected.
               </small>
@@ -672,22 +681,28 @@ function App() {
       return
     }
     if (lower.includes("lifestyle")) {
-      setFlow("counselling")
+      setFlow("general")
       simulatedLoad(() =>
         addMessages(
           assistantMessage(
-            <CounsellingContent type="lifestyle" />,
-            ["Ask a follow-up", "Review conversation summary"],
-            "success",
-            "HealthHub guidance",
+            "I can only help with hypertension medicines, medicine-related symptoms, and when to seek care. Lifestyle and other general health questions are outside this assistant's scope.",
+            undefined,
+            "warning",
+            "Outside approved scope",
           ),
         ),
       )
-      saveHistory("Lifestyle and blood pressure", "Counselling provided")
       return
     }
     setFlow("general")
-    void askAssistant(question)
+    addMessages(
+      assistantMessage(
+        "I can only help patients with questions about hypertension medicines, their use, possible medicine-related symptoms, and when to seek care. Please contact an appropriate healthcare professional for other concerns.",
+        undefined,
+        "warning",
+        "Outside approved scope",
+      ),
+    )
   }
 
   const submitEmergency = () => {
@@ -697,7 +712,7 @@ function App() {
         userMessage(selectedSigns.join(", ")),
         assistantMessage(
           <EmergencyContent />,
-          ["I will seek urgent help", "Show care options"],
+          ["I will seek urgent help", "I cannot take action now"],
           "warning",
           "Urgent action recommended",
         ),
@@ -783,8 +798,21 @@ function App() {
       return
     }
     addMessages(userMessage(option))
+    if (flow === "symptom-detail") {
+      setClinicalContext((context) =>
+        `${context}\nPatient-reported symptom progression: ${option}`.trim(),
+      )
+    }
+    if (option === "I take other medicines") {
+      setClinicalContext((context) =>
+        `${context}\nPatient reports taking other medicines; names and dosages still require confirmation.`.trim(),
+      )
+    }
     if (flow === "record-confirm") {
       if (option.startsWith("Yes")) {
+        setClinicalContext((context) =>
+          `${context}\nMedication confirmed by patient: Amlodipine 5 mg, once daily.`.trim(),
+        )
         setFlow("medicine-scope")
         simulatedLoad(() =>
           addMessages(
@@ -803,6 +831,9 @@ function App() {
           ),
         )
       } else {
+        setClinicalContext((context) =>
+          `${context}\nMedication record not confirmed; exact medicine and dosage require verification.`.trim(),
+        )
         setFlow("handoff")
         addMessages(
           assistantMessage(
@@ -938,15 +969,29 @@ function App() {
       return
     }
     if (option === "I will seek urgent help") {
-      setUnresolved(false)
+      setUnresolved(true)
       addMessages(
         assistantMessage(
-          "Recorded as patient-reported: you intend to seek urgent help. This is not confirmation that care was received. This chat cannot call or dispatch emergency assistance.",
+          "Recorded as patient-reported: you intend to seek urgent help. This does not confirm that care was received. The chatbot cannot call 995, dispatch help, or confirm that assistance is on the way.",
           undefined,
           "normal",
-          "Action recorded",
+          "Emergency reminder",
         ),
       )
+      saveHistory("Urgent symptom check", "Emergency action unconfirmed")
+      return
+    }
+    if (option === "I cannot take action now") {
+      setUnresolved(true)
+      addMessages(
+        assistantMessage(
+          "Please seek emergency help immediately if you can. This conversation remains unresolved because the chatbot cannot confirm your safety or dispatch assistance. Call 995 for a life-threatening emergency.",
+          undefined,
+          "warning",
+          "Emergency follow-up unresolved",
+        ),
+      )
+      saveHistory("Urgent symptom check", "Emergency follow-up unresolved")
       return
     }
     addMessages(
@@ -959,6 +1004,7 @@ function App() {
 
   const send = (event?: FormEvent) => {
     event?.preventDefault()
+    if (assistant !== "hypertension") return
     const clean = input.trim()
     if (!clean) return
     setInput("")
@@ -970,6 +1016,9 @@ function App() {
     addMessages(userMessage(clean))
 
     if (flow === "symptom-description") {
+      setClinicalContext((context) =>
+        `${context}\nPatient-reported symptoms: ${clean}`.trim(),
+      )
       setFlow("symptom-detail")
       addMessages(
         assistantMessage(
@@ -1010,7 +1059,7 @@ function App() {
         addMessages(
           assistantMessage(
             <EmergencyContent />,
-            ["I will seek urgent help", "Show care options"],
+            ["I will seek urgent help", "I cannot take action now"],
             "warning",
             "Urgent action recommended",
           ),
@@ -1041,7 +1090,7 @@ function App() {
       simulatedLoad(() =>
         addMessages(
           assistantMessage(
-            "That appears to be outside this Hypertension Assistant’s approved scope. You can switch to HealthHub AI Beta for general health and service questions, or contact a healthcare professional.",
+            "That appears to be outside this Hypertension Assistant’s approved scope. Please ask about blood pressure, hypertension medicines, symptoms, or when to seek care. For other health or service questions, use the appropriate healthcare service.",
             ["Show care options"],
             "warning",
             "Outside approved scope",
@@ -1135,7 +1184,18 @@ function App() {
                 </div>
               )}
             </div>
-            <Composer input={input} onChange={setInput} onSubmit={send} />
+            {assistant === "hypertension" ? (
+              <Composer input={input} onChange={setInput} onSubmit={send} />
+            ) : (
+              <div className="composer-area">
+                <div className="ghost-input">
+                  HealthHub AI Beta is a demonstration view only.
+                </div>
+                <small>
+                  Select Hypertension Assistant to start a conversation.
+                </small>
+              </div>
+            )}
           </>
         )}
         {singpassRequiredOpen && (
@@ -1509,7 +1569,7 @@ function Navigation({
             </span>
             <span>
               <strong>HealthHub AI Beta</strong>
-              <small>General health and HealthHub services</small>
+              <small>Demonstration view only — conversation disabled</small>
             </span>
             {active === "healthhub" && <Icon name="check" size={18} />}
           </button>
