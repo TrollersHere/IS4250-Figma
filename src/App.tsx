@@ -299,7 +299,15 @@ function Logo() {
   )
 }
 
-function Homepage({ onOpen }: { onOpen: () => void }) {
+function Homepage({
+  onOpen,
+  onAcceptCookies,
+  cookiesAccepted,
+}: {
+  onOpen: () => void
+  onAcceptCookies: () => void
+  cookiesAccepted: boolean
+}) {
   const cards = [
     {
       title: "Senna / Sennosides",
@@ -424,19 +432,24 @@ function Homepage({ onOpen }: { onOpen: () => void }) {
           <small>Beta</small>
         </span>
       </button>
-      <div className="cookie" role="status">
-        <span className="cookie-copy">
-          By continuing to use and navigate the HealthHub website, you consent
-          to the use of cookies.
-        </span>
-        <button type="button">Accept</button>
-      </div>
+      {!cookiesAccepted && (
+        <div className="cookie" role="status">
+          <span className="cookie-copy">
+            By continuing to use and navigate the HealthHub website, you consent
+            to the use of cookies.
+          </span>
+          <button type="button" onClick={onAcceptCookies}>
+            Accept
+          </button>
+        </div>
+      )}
     </div>
   )
 }
 
 function App() {
   const [panelOpen, setPanelOpen] = useState(true)
+  const [cookiesAccepted, setCookiesAccepted] = useState(false)
   const [accepted, setAccepted] = useState(false)
   const [singpassSignedIn, setSingpassSignedIn] = useState(false)
   const [singpassRequiredOpen, setSingpassRequiredOpen] = useState(false)
@@ -1120,7 +1133,11 @@ function App() {
 
   return (
     <div className="app">
-      <Homepage onOpen={() => setPanelOpen(true)} />
+      <Homepage
+        onOpen={() => setPanelOpen(true)}
+        onAcceptCookies={() => setCookiesAccepted(true)}
+        cookiesAccepted={cookiesAccepted}
+      />
       {panelOpen && <div className="page-dim" />}
       <aside className={`ai-panel ${panelOpen ? "open" : ""}`}>
         {!accepted ? (
