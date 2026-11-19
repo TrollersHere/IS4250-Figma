@@ -1,0 +1,10 @@
+{
+  "description": "Helps patients explore hypertension medication questions through guided chat, relevant health records, safety guidance, and professional review summaries.",
+  "robots": {
+    "index": false
+  },
+  "accessibility": {
+    "addBypassLinks": false,
+    "ignoreReducedMotion": false
+  }
+}
