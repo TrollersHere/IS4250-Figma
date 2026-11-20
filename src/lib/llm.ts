@@ -32,12 +32,61 @@ Use null, unknown, or empty arrays for missing information. The application, not
 controls emergency escalation and workflow transitions.`
 
 const endpoint = import.meta.env.VITE_LLM_API_URL || "/api/chat"
+const browserGeminiKey = import.meta.env.VITE_GEMINI_API_KEY
+const browserGeminiModel = import.meta.env.VITE_GEMINI_MODEL || "gemini-3.5-flash-lite"
+
+async function callBrowserGemini(messages: ChatMessage[]) {
+  const system = messages.find((message) => message.role === "system")
+  const contents = messages
+    .filter((message) => message.role !== "system")
+    .map((message) => ({
+      role: message.role === "assistant" ? "model" : "user",
+      parts: [{ text: message.content }],
+    }))
+  const response = await fetch(
+    `https://generativelanguage.googleapis.com/v1beta/models/${browserGeminiModel}:generateContent?key=${browserGeminiKey}`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        systemInstruction: system ? { parts: [{ text: system.content }] } : undefined,
+        contents,
+        generationConfig: { responseMimeType: "application/json", maxOutputTokens: 700 },
+      }),
+    },
+  )
+  const data = (await response.json()) as {
+    candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>
+    error?: { message?: string }
+  }
+  if (!response.ok) throw new Error(data.error?.message || `Gemini request failed (${response.status})`)
+  return data.candidates?.[0]?.content?.parts?.map((part) => part.text || "").join("") || ""
+}
 
 export async function askLLM(
   messages: ChatMessage[],
   signal?: AbortSignal,
   clinicalContext = "",
 ) : Promise<StructuredAssistantResult> {
+  if (browserGeminiKey) {
+    const content = await callBrowserGemini([
+      { role: "system", content: clinicalContext ? `${structuredPrompt}\n\nKnown clinical context:\n${clinicalContext}` : structuredPrompt },
+      ...messages,
+    ])
+    try {
+      const parsed = JSON.parse(content) as Partial<StructuredAssistantResult>
+      if (parsed.response) {
+        return {
+          extraction: parsed.extraction || emptyExtraction(),
+          response: parsed.response,
+          suggestedState: parsed.suggestedState,
+        }
+      }
+    } catch {
+      // Fall through and display a plain model response if JSON was not returned.
+    }
+    if (content.trim()) return { extraction: emptyExtraction(), response: content.trim() }
+  }
   const response = await fetch(endpoint, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
