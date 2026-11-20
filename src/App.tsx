@@ -1,4 +1,4 @@
-import { FormEvent, ReactNode, useEffect, useRef, useState } from "react"
+import { FormEvent, ReactNode, isValidElement, useEffect, useRef, useState } from "react"
 import { askLLM, ChatMessage, classifyIntent } from "./lib/llm"
 
 type IconName = "alert" | "arrow" | "book" | "bot" | "check" | "chevron" | "close" | "download" | "history" | "home" | "menu" | "mic" | "paperclip" | "send" | "shield" | "stethoscope" | "user"
@@ -20,10 +20,13 @@ type HistoryItem = {
   transcript?: Array<{
     role: "assistant" | "user"
     text: string
+    label?: string
+    options?: string[]
   }>
 }
 
 const green = "#087a5b"
+const RECENT_CONVERSATIONS_KEY = "healthhub-recent-conversations"
 const emergencySigns = [
   "Chest pain, pressure or tightness",
   "Severe difficulty breathing",
@@ -198,6 +201,35 @@ const initialHistory: HistoryItem[] = [
     ],
   },
 ]
+
+function nodeToText(node: ReactNode): string {
+  if (node == null || typeof node === "boolean") return ""
+  if (typeof node === "string" || typeof node === "number") return String(node)
+  if (Array.isArray(node)) return node.map(nodeToText).filter(Boolean).join(" ")
+  if (isValidElement(node)) {
+    return nodeToText(
+      (node.props as { children?: ReactNode }).children,
+    )
+  }
+  return ""
+}
+
+function loadRecentConversations(): HistoryItem[] {
+  try {
+    const stored = window.localStorage.getItem(RECENT_CONVERSATIONS_KEY)
+    if (!stored) return initialHistory
+    const parsed = JSON.parse(stored) as HistoryItem[]
+    return Array.isArray(parsed) ? parsed : initialHistory
+  } catch {
+    return initialHistory
+  }
+}
+
+function formatConversationTime(value: string): string {
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return value
+  return date.toLocaleString([], { dateStyle: "medium", timeStyle: "short" })
+}
 
 function Icon({ name, size = 20 }: { name: IconName; size?: number }) {
   const paths: Record<IconName, ReactNode> = {
@@ -473,11 +505,48 @@ function App() {
   const [selectedSigns, setSelectedSigns] = useState<string[]>([])
   const [handoffOpen, setHandoffOpen] = useState(false)
   const [handoffConfirmed, setHandoffConfirmed] = useState(false)
-  const [history, setHistory] = useState<HistoryItem[]>(initialHistory)
+  const [history, setHistory] = useState<HistoryItem[]>(loadRecentConversations)
+  const [activeConversationId, setActiveConversationId] = useState(() =>
+    crypto.randomUUID(),
+  )
   const [unresolved, setUnresolved] = useState(true)
   const [llmConversation, setLlmConversation] = useState<ChatMessage[]>([])
   const [clinicalContext, setClinicalContext] = useState("")
   const endRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(
+        RECENT_CONVERSATIONS_KEY,
+        JSON.stringify(history),
+      )
+    } catch {
+      // Storage may be unavailable in private browsing or restricted previews.
+    }
+  }, [history])
+
+  useEffect(() => {
+    if (!messages.length || assistant !== "hypertension") return
+    const transcript = messages
+      .map((message) => ({
+        role: message.role,
+        text: nodeToText(message.body),
+        label: message.label,
+        options: message.options,
+      }))
+      .filter((entry) => entry.text.trim())
+    const firstUserMessage = transcript.find((entry) => entry.role === "user")
+    setHistory((items) => [
+      {
+        id: activeConversationId,
+        title: firstUserMessage?.text.slice(0, 60) || "Hypertension Assistant conversation",
+        time: new Date().toISOString(),
+        status: "In progress",
+        transcript,
+      },
+      ...items.filter((item) => item.id !== activeConversationId),
+    ])
+  }, [messages, activeConversationId, assistant])
 
   useEffect(() => {
     endRef.current?.scrollIntoView({ behavior: "smooth" })
@@ -515,12 +584,20 @@ function App() {
   const saveHistory = (title: string, status: string) => {
     setHistory((items) => [
       {
-        id: crypto.randomUUID(),
+        id: activeConversationId,
         title,
-        time: "Just now",
+        time: new Date().toISOString(),
         status,
+        transcript: messages
+          .map((message) => ({
+            role: message.role,
+            text: nodeToText(message.body),
+            label: message.label,
+            options: message.options,
+          }))
+          .filter((entry) => entry.text.trim()),
       },
-      ...items.filter((item) => item.title !== title),
+      ...items.filter((item) => item.id !== activeConversationId),
     ])
   }
 
@@ -532,6 +609,7 @@ function App() {
       },
     ]
     setAssistant("hypertension")
+    setActiveConversationId(item.id)
     setLanding(false)
     setFlow("idle")
     setDrawerOpen(false)
@@ -541,7 +619,8 @@ function App() {
         id: crypto.randomUUID(),
         role: entry.role,
         body: entry.text,
-        label: entry.role === "assistant" ? "Saved conversation" : undefined,
+        label: entry.label || (entry.role === "assistant" ? "Saved conversation" : undefined),
+        options: entry.options,
       })),
     )
   }
@@ -561,6 +640,7 @@ function App() {
     setAssistant(next)
     setLanding(true)
     setMessages([])
+    setActiveConversationId(crypto.randomUUID())
     setClinicalContext("")
     setFlow("idle")
     setSelectedSigns([])
@@ -585,10 +665,15 @@ function App() {
     setLlmConversation(nextConversation)
     setLoading(true)
     try {
-      const reply = await askLLM(nextConversation, undefined, clinicalContext)
-      setLlmConversation([...nextConversation, { role: "assistant", content: reply }])
+      const result = await askLLM(nextConversation, undefined, clinicalContext)
+      // The scripted UI remains the source of truth for safety transitions.
+      // Structured extraction is retained as session context for later turns.
+      setClinicalContext((context) =>
+        `${context}\nStructured extraction: ${JSON.stringify(result.extraction)}`.trim(),
+      )
+      setLlmConversation([...nextConversation, { role: "assistant", content: result.response }])
       addMessages(
-        assistantMessage(reply, undefined, "normal", "Hypertension Assistant"),
+        assistantMessage(result.response, undefined, "normal", "Hypertension Assistant"),
       )
     } catch {
       addMessages(
@@ -637,6 +722,13 @@ function App() {
             ? "symptoms"
             : "information",
     )
+    // Preserve symptoms already stated during intake so the later clinical
+    // questions collect missing detail instead of asking for the symptom again.
+    if (symptomByClassifier || lower.includes("dizzy") || lower.includes("cough") || lower.includes("headache") || lower.includes("symptom") || lower.includes("reading")) {
+      setClinicalContext((context) =>
+        `${context}\nPatient-reported symptoms at intake: ${question}`.trim(),
+      )
+    }
     if (
       emergencyByRule ||
       classification?.possibleEmergency ||
@@ -930,13 +1022,26 @@ function App() {
     }
     if (flow === "clinical-background") {
       if (option === "No to all") {
-        setFlow("symptom-description")
+        const symptomAlreadyCaptured = clinicalContext.includes(
+          "Patient-reported symptoms at intake:",
+        ) || clinicalContext.includes("Patient-reported symptoms:")
+        setFlow(symptomAlreadyCaptured ? "symptom-detail" : "symptom-description")
         addMessages(
           assistantMessage(
-            "What symptom or symptoms are you experiencing? Describe them in your own words, including where you feel them if relevant.",
-            undefined,
+            symptomAlreadyCaptured
+              ? "Thanks. When did the symptom begin, how severe is it now, and is it improving, unchanged, or getting worse?"
+              : "What symptom or symptoms are you experiencing? Describe them in your own words, including where you feel them if relevant.",
+            symptomAlreadyCaptured
+              ? [
+                  "Today, mild and improving",
+                  "Today and getting worse",
+                  "Several days, mild and unchanged",
+                  "Severe or rapidly worsening",
+                  "I’m not sure",
+                ]
+              : undefined,
             "normal",
-            "Symptom description",
+            symptomAlreadyCaptured ? "Onset, severity and progression" : "Symptom description",
           ),
         )
       } else {
@@ -1170,6 +1275,12 @@ function App() {
                 history={history}
                 onClose={() => setHistoryOpen(false)}
                 onOpen={openHistoryConversation}
+                onClear={() => {
+                  if (window.confirm("Clear all saved conversation history?")) {
+                    setHistory([])
+                    setHistoryOpen(false)
+                  }
+                }}
               />
             )}
             <div className="chat-body">
@@ -1242,6 +1353,7 @@ function App() {
         <HandoffModal
           confirmed={handoffConfirmed}
           unresolved={unresolved}
+          showCareOptions={flow !== "emergency"}
           onClose={() => setHandoffOpen(false)}
           onConfirm={() => {
             setHandoffConfirmed(true)
@@ -1615,7 +1727,7 @@ function Navigation({
               <Icon name="history" size={17} />
               <span>
                 <strong>{item.title}</strong>
-                <small>{item.time}</small>
+                <small>{formatConversationTime(item.time)}</small>
               </span>
             </button>
           ))}
@@ -1636,10 +1748,12 @@ function HistoryPanel({
   history,
   onClose,
   onOpen,
+  onClear,
 }: {
   history: HistoryItem[]
   onClose: () => void
   onOpen: (item: HistoryItem) => void
+  onClear: () => void
 }) {
   return (
     <div className="history-panel">
@@ -1660,7 +1774,7 @@ function HistoryPanel({
             </span>
             <span>
               <strong>{item.title}</strong>
-              <small>{item.time}</small>
+              <small>{formatConversationTime(item.time)}</small>
               <em
                 className={
                   item.status.includes("unresolved") ? "unresolved" : ""
@@ -1673,6 +1787,11 @@ function HistoryPanel({
           </button>
         ))}
       </div>
+      {history.length > 0 && (
+        <button className="history-clear-button" onClick={onClear}>
+          Clear all conversation history
+        </button>
+      )}
     </div>
   )
 }
@@ -2273,12 +2392,14 @@ function Composer({
 function HandoffModal({
   confirmed,
   unresolved,
+  showCareOptions,
   onClose,
   onConfirm,
   onDownload,
 }: {
   confirmed: boolean
   unresolved: boolean
+  showCareOptions: boolean
   onClose: () => void
   onConfirm: () => void
   onDownload: () => void
@@ -2351,6 +2472,17 @@ function HandoffModal({
               medical record.
             </span>
           </div>
+          {showCareOptions && (
+            <div className="summary-care-options">
+              <div className="section-heading">
+                <div>
+                  <span className="drawer-label">NEXT STEP</span>
+                  <h3>Book a care option</h3>
+                </div>
+              </div>
+              <CareOptions />
+            </div>
+          )}
         </div>
         <div className="handoff-actions">
           {!confirmed ? (

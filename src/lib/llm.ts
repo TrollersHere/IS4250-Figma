@@ -1,3 +1,5 @@
+import { AssistantExtraction, StructuredAssistantResult, emptyExtraction } from "./workflow"
+
 export type ChatRole = "system" | "user" | "assistant"
 
 export type ChatMessage = {
@@ -21,13 +23,21 @@ Use the known clinical context supplied with the conversation. Do not ask the pa
 Be concise, empathetic, and clear. Say when you are uncertain. Do not claim access to medical records, bookings, or live services.
 This is a prototype and your response must not imply that a clinician has reviewed it.`
 
+const structuredPrompt = `${systemPrompt}
+
+For every user message, extract facts into the JSON contract supplied by the application.
+Return JSON with exactly these top-level fields: extraction, response, suggestedState.
+Never infer that an emergency sign is absent when it was not explicitly checked.
+Use null, unknown, or empty arrays for missing information. The application, not the model,
+controls emergency escalation and workflow transitions.`
+
 const endpoint = import.meta.env.VITE_LLM_API_URL || "/api/chat"
 
 export async function askLLM(
   messages: ChatMessage[],
   signal?: AbortSignal,
   clinicalContext = "",
-) {
+) : Promise<StructuredAssistantResult> {
   const response = await fetch(endpoint, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -36,8 +46,8 @@ export async function askLLM(
         {
           role: "system",
           content: clinicalContext
-            ? `${systemPrompt}\n\nKnown clinical context:\n${clinicalContext}`
-            : systemPrompt,
+            ? `${structuredPrompt}\n\nKnown clinical context:\n${clinicalContext}`
+            : structuredPrompt,
         },
         ...messages,
       ],
@@ -51,12 +61,21 @@ export async function askLLM(
 
   const data = (await response.json()) as {
     reply?: string
+    response?: string
+    extraction?: AssistantExtraction
+    suggestedState?: StructuredAssistantResult["suggestedState"]
+    result?: Partial<StructuredAssistantResult>
     message?: { content?: string }
     choices?: Array<{ message?: { content?: string } }>
   }
-  const reply = data.reply || data.message?.content || data.choices?.[0]?.message?.content
+  const raw = data.result || data
+  const reply = raw.response || data.reply || data.message?.content || data.choices?.[0]?.message?.content
   if (!reply?.trim()) throw new Error("LLM response did not contain a reply")
-  return reply.trim()
+  return {
+    extraction: raw.extraction || emptyExtraction(),
+    response: reply.trim(),
+    suggestedState: raw.suggestedState,
+  }
 }
 
 export async function classifyIntent(question: string) {
