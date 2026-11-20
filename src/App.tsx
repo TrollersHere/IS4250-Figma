@@ -487,7 +487,7 @@ function App() {
   const [singpassRequiredOpen, setSingpassRequiredOpen] = useState(false)
   const [pendingHypertension, setPendingHypertension] = useState<{
     kind: "assistant"
-  } | { kind: "history"; item: HistoryItem } | null>(null)
+  } | { kind: "history"; item: HistoryItem } | { kind: "history-list" } | null>(null)
   const [assistant, setAssistant] = useState<"healthhub" | "hypertension">(
     "healthhub",
   )
@@ -1257,7 +1257,14 @@ function App() {
             <PanelHeader
               assistant={assistant}
               onClose={() => setPanelOpen(false)}
-              onHistory={() => setHistoryOpen((value) => !value)}
+              onHistory={() => {
+                if (!singpassSignedIn) {
+                  setPendingHypertension({ kind: "history-list" })
+                  setSingpassRequiredOpen(true)
+                  return
+                }
+                setHistoryOpen((value) => !value)
+              }}
               onMenu={() => setDrawerOpen((value) => !value)}
             />
             {drawerOpen && (
@@ -1331,12 +1338,20 @@ function App() {
             onClose={() => {
               setSingpassRequiredOpen(false)
               setPendingHypertension(null)
+              setAssistant("healthhub")
+              setLanding(true)
+              setMessages([])
+              setFlow("idle")
+              setSelectedSigns([])
+              setHistoryOpen(false)
             }}
             onSuccess={() => {
               setSingpassSignedIn(true)
               setSingpassRequiredOpen(false)
               if (pendingHypertension?.kind === "history") {
                 loadHistoryConversation(pendingHypertension.item)
+              } else if (pendingHypertension?.kind === "history-list") {
+                setHistoryOpen(true)
               } else {
                 setAssistant("hypertension")
                 setLanding(true)
@@ -1720,18 +1735,20 @@ function Navigation({
             {active === "hypertension" && <Icon name="check" size={18} />}
           </button>
         </div>
-        <div className="drawer-recent">
-          <span className="drawer-label">RECENT CONVERSATIONS</span>
-          {history.slice(0, 4).map((item) => (
-            <button key={item.id} onClick={() => onOpenHistory(item)}>
-              <Icon name="history" size={17} />
-              <span>
-                <strong>{item.title}</strong>
-                <small>{formatConversationTime(item.time)}</small>
-              </span>
-            </button>
-          ))}
-        </div>
+        {signedIn && (
+          <div className="drawer-recent">
+            <span className="drawer-label">RECENT CONVERSATIONS</span>
+            {history.slice(0, 4).map((item) => (
+              <button key={item.id} onClick={() => onOpenHistory(item)}>
+                <Icon name="history" size={17} />
+                <span>
+                  <strong>{item.title}</strong>
+                  <small>{formatConversationTime(item.time)}</small>
+                </span>
+              </button>
+            ))}
+          </div>
+        )}
         <div className="drawer-footer">
           <Icon name="shield" size={17} />
           <span>
@@ -1767,29 +1784,28 @@ function HistoryPanel({
         </button>
       </div>
       <div className="history-list">
-        {history.map((item) => (
+        {history.length ? history.map((item) => (
           <button key={item.id} onClick={() => onOpen(item)}>
-            <span className="history-symbol">
-              <Icon name="history" />
-            </span>
+            <span className="history-symbol"><Icon name="history" /></span>
             <span>
               <strong>{item.title}</strong>
               <small>{formatConversationTime(item.time)}</small>
-              <em
-                className={
-                  item.status.includes("unresolved") ? "unresolved" : ""
-                }
-              >
-                {item.status}
-              </em>
+              <em className={item.status.includes("unresolved") ? "unresolved" : ""}>{item.status}</em>
             </span>
             <Icon name="chevron" size={17} />
           </button>
-        ))}
+        )) : (
+          <div className="history-empty">
+            <span className="history-empty-icon"><Icon name="history" size={23} /></span>
+            <strong>No saved conversations</strong>
+            <span>Your recent chats will appear here automatically.</span>
+          </div>
+        )}
       </div>
       {history.length > 0 && (
         <button className="history-clear-button" onClick={onClear}>
-          Clear all conversation history
+          <Icon name="close" size={15} />
+          Clear all history
         </button>
       )}
     </div>
