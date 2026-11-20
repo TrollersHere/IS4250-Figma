@@ -31,7 +31,6 @@ Never infer that an emergency sign is absent when it was not explicitly checked.
 Use null, unknown, or empty arrays for missing information. The application, not the model,
 controls emergency escalation and workflow transitions.`
 
-const endpoint = import.meta.env.VITE_LLM_API_URL || "/api/chat"
 const browserGeminiKey = import.meta.env.VITE_GEMINI_API_KEY
 const browserGeminiModel = import.meta.env.VITE_GEMINI_MODEL || "gemini-3.5-flash-lite"
 
@@ -68,76 +67,39 @@ export async function askLLM(
   signal?: AbortSignal,
   clinicalContext = "",
 ) : Promise<StructuredAssistantResult> {
-  if (browserGeminiKey) {
-    const content = await callBrowserGemini([
-      { role: "system", content: clinicalContext ? `${structuredPrompt}\n\nKnown clinical context:\n${clinicalContext}` : structuredPrompt },
-      ...messages,
-    ])
-    try {
-      const parsed = JSON.parse(content) as Partial<StructuredAssistantResult>
-      if (parsed.response) {
-        return {
-          extraction: parsed.extraction || emptyExtraction(),
-          response: parsed.response,
-          suggestedState: parsed.suggestedState,
-        }
+  if (!browserGeminiKey) {
+    throw new Error("VITE_GEMINI_API_KEY is not configured")
+  }
+  const content = await callBrowserGemini([
+    { role: "system", content: clinicalContext ? `${structuredPrompt}\n\nKnown clinical context:\n${clinicalContext}` : structuredPrompt },
+    ...messages,
+  ])
+  try {
+    const parsed = JSON.parse(content) as Partial<StructuredAssistantResult>
+    if (parsed.response) {
+      return {
+        extraction: parsed.extraction || emptyExtraction(),
+        response: parsed.response,
+        suggestedState: parsed.suggestedState,
       }
-    } catch {
-      // Fall through and display a plain model response if JSON was not returned.
     }
-    if (content.trim()) return { extraction: emptyExtraction(), response: content.trim() }
+  } catch {
+    // Display a plain model response if the provider did not return JSON.
   }
-  const response = await fetch(endpoint, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      messages: [
-        {
-          role: "system",
-          content: clinicalContext
-            ? `${structuredPrompt}\n\nKnown clinical context:\n${clinicalContext}`
-            : structuredPrompt,
-        },
-        ...messages,
-      ],
-    }),
-    signal,
-  })
-
-  if (!response.ok) {
-    throw new Error(`LLM request failed (${response.status})`)
-  }
-
-  const data = (await response.json()) as {
-    reply?: string
-    response?: string
-    extraction?: AssistantExtraction
-    suggestedState?: StructuredAssistantResult["suggestedState"]
-    result?: Partial<StructuredAssistantResult>
-    message?: { content?: string }
-    choices?: Array<{ message?: { content?: string } }>
-  }
-  const raw = data.result || data
-  const reply = raw.response || data.reply || data.message?.content || data.choices?.[0]?.message?.content
-  if (!reply?.trim()) throw new Error("LLM response did not contain a reply")
-  return {
-    extraction: raw.extraction || emptyExtraction(),
-    response: reply.trim(),
-    suggestedState: raw.suggestedState,
-  }
+  if (content.trim()) return { extraction: emptyExtraction(), response: content.trim() }
+  throw new Error("Gemini response did not contain a reply")
 }
 
 export async function classifyIntent(question: string) {
-  const response = await fetch(endpoint, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      mode: "classify",
-      question,
-    }),
-  })
-  if (!response.ok) throw new Error(`Classifier request failed (${response.status})`)
-  const data = (await response.json()) as { classification?: IntentClassification }
-  if (!data.classification) throw new Error("Classifier response was invalid")
-  return data.classification
+  if (!browserGeminiKey) throw new Error("VITE_GEMINI_API_KEY is not configured")
+  const content = await callBrowserGemini([
+    {
+      role: "system",
+      content: `Classify the user's health question. Return JSON only with exactly these fields: intent, mentionsMedication, mentionsSymptoms, possibleEmergency. intent must be medicine, symptom, emergency, general, or unclear. Be conservative about possibleEmergency.`,
+    },
+    { role: "user", content: question },
+  ])
+  const classification = JSON.parse(content) as IntentClassification
+  if (!classification.intent) throw new Error("Classifier response was invalid")
+  return classification
 }
